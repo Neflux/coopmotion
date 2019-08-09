@@ -9,13 +9,12 @@ from . import Run, Trace, prepare
 
 # Non sequential dataset
 def generate_randomstart_dataset(run: Run, number: int = 1) -> Trace:
-    traces = [run(T=0, epsilon=0.01) for i in range(number)]
+    traces = [run(T=0, epsilon=0) for _ in range(number)]
     return Trace(*[np.concatenate(x) for x in zip(*traces)])
 
 # Non sequential dataset
 def generate_non_sequential_dataset(run: Run, number: int = 1, epsilon: float = 0.01, name: str = '') -> Trace:
-    # why T=0?
-    traces = [run(T=np.inf, epsilon=epsilon) for i in range(number)]
+    traces = [run(T=np.inf, epsilon=epsilon) for _ in range(number)]
 
     trace = [np.concatenate(x) for x in zip(*traces)]
     reindex = np.arange(len(trace[0]))
@@ -35,12 +34,18 @@ def load_non_sequential_dataset(name: str = '') -> Trace:
 
 
 def central_dataset(trace: Trace) -> TensorDataset:
-    return TensorDataset(torch.FloatTensor(trace.state).flatten(start_dim=1), torch.FloatTensor(trace.control).flatten(start_dim=1))
+    from task.square import efficient_trace_extraction
+    raw = efficient_trace_extraction(trace.pos_state)
+    print(raw.shape, trace.control.shape)
+    return TensorDataset(torch.FloatTensor(raw).flatten(start_dim=1),
+                         torch.FloatTensor(trace.control).flatten(start_dim=1))
 
 
 def distributed_dataset(trace: Trace) -> TensorDataset:
     ss = trace.sensing
     cs = trace.control
+
+    print(ss.shape, cs.shape)
     return TensorDataset(
         torch.FloatTensor(ss.reshape(ss.shape[0]*ss.shape[1], ss.shape[2]*ss.shape[3])),
         torch.FloatTensor(cs.reshape(cs.shape[0]*cs.shape[1], cs.shape[2]))

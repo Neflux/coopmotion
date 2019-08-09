@@ -112,3 +112,7 @@ archive
 
 dataset/*
 models/*
+
+.DS_Store
+
+*/.ipynb_checkpoints/*

@@ -153,7 +153,7 @@ plot_error(time, net_error, color='grey', label='centralized')
 number_of_samples = 100
 task = dynamic_evenly_spread_task(N)
 sensor_testing_pipeline = [
-    sense_fixed_in_range(0.7)
+    sense_in_range(0.7)
 ]
 
 from matplotlib import cm
@@ -224,7 +224,7 @@ batch_size = 100
 broadcast_size = 2
 task = dynamic_evenly_spread_task(N)
 sensor_testing_pipeline = [
-    sense_fixed_in_range(0.7)
+    sense_in_range(0.7)
 ]
 
 from matplotlib import cm

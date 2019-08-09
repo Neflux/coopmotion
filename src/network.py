@@ -4,7 +4,10 @@ import torch
 import torch.nn.functional as F
 from torch.utils import data
 from tqdm import tqdm
-#from tqdm import tqdm_notebook as tqdm
+# from tqdm import tqdm_notebook as tqdm
+from task.square import efficient_state_extraction
+import numpy as np
+
 
 def train_net(epochs: int,
               train_dataset: data.TensorDataset,
@@ -52,7 +55,7 @@ class CentralizedNet(torch.nn.Module):
 
     def __init__(self, N: int):
         super(CentralizedNet, self).__init__()
-        self.l1 = torch.nn.Linear(N * 2, 64)
+        self.l1 = torch.nn.Linear(N * 3, 64)
         self.l2 = torch.nn.Linear(64, 64)
         self.l3 = torch.nn.Linear(64, N * 2)
         self.N = N
@@ -65,40 +68,21 @@ class CentralizedNet(torch.nn.Module):
         return self.l3(xys)
 
     def controller(self):
-        def f(state, sensing):
-            with torch.no_grad():
-                return self(torch.FloatTensor(state).flatten()).numpy().reshape(self.N, 2),
+        def fake_target_filter(targets):
+            def f(state, sensing):
+                with torch.no_grad():
+                    return self(torch.FloatTensor(efficient_state_extraction(state)).flatten()) \
+                               .numpy().reshape(self.N, 2),
 
-        return f
+            return f
+
+        return fake_target_filter
 
 
 class DistributedNet(torch.nn.Module):
 
     def __init__(self, input_size: int):
         super(DistributedNet, self).__init__()
-        # every robot
-        self.l1 = torch.nn.Linear(input_size, 32)
-        self.l2 = torch.nn.Linear(32, 32)
-        self.l3 = torch.nn.Linear(32, 2)
-        self.input_size = input_size
-
-    def forward(self, xs):
-        ys = torch.tanh(self.l1(xs))
-        ys = torch.tanh(self.l2(ys))
-        return self.l3(ys)
-
-    def controller(self):
-        def f(state, sensing):
-            with torch.no_grad():
-                return self(torch.FloatTensor(sensing.reshape(
-                    sensing.shape[0], sensing.shape[1] * sensing.shape[2]))).numpy().reshape(-1, 2),
-
-        return f
-
-class EnhancedDistributedNet(torch.nn.Module):
-
-    def __init__(self, input_size: int):
-        super(EnhancedDistributedNet, self).__init__()
         # every robot
         self.l1 = torch.nn.Linear(input_size, 64)
         self.l2 = torch.nn.Linear(64, 64)
@@ -107,16 +91,21 @@ class EnhancedDistributedNet(torch.nn.Module):
 
         self.drop_layer = torch.nn.Dropout(0.3)
 
-
     def forward(self, xs):
         ys = self.drop_layer(torch.tanh(self.l1(xs)))
         ys = self.drop_layer(torch.tanh(self.l2(ys)))
         return self.l3(ys)
 
     def controller(self):
-        def f(state, sensing):
-            with torch.no_grad():
-                return self(torch.FloatTensor(sensing.reshape(
-                    sensing.shape[0], sensing.shape[1] * sensing.shape[2]))).numpy().reshape(-1, 2),
+        def fake_target_filter(targets):
+            def f(state, sensing):
+                with torch.no_grad():
+                    net_output = self(torch.FloatTensor(
+                        sensing.reshape(sensing.shape[0], sensing.shape[1] * sensing.shape[2]))).numpy()
+                    net_output[:, 0] = np.clip(net_output[:, 0], -0.5, 0.5)
+                    net_output[:, 1] = np.clip(net_output[:, 1], -np.pi, np.pi)
+                    return net_output.reshape(-1, 2),
 
-        return f
+            return f
+
+        return fake_target_filter

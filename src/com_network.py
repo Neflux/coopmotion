@@ -78,12 +78,14 @@ class ComNet(nn.Module):
         return torch.stack(rs).reshape(len(rs), -1, self.N, 2)
 
     def controller(self):
-        comm = self.init_comm()
+        def fake_target_filter(targets):
+            comm = self.init_comm()
 
-        def f(state, sensing):
-            with torch.no_grad():
-                sensing = torch.FloatTensor(sensing)
-                control = self.step(sensing, comm).numpy()
-                return control.reshape(self.N, 2), comm.copy()
+            def f(state, sensing):
+                with torch.no_grad():
+                    sensing = torch.FloatTensor(sensing)
+                    control = self.step(sensing, comm).numpy()
+                    return control.reshape(self.N, 2), comm.copy()
 
-        return f
+            return f
+        return fake_target_filter
