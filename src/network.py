@@ -8,6 +8,21 @@ from tqdm import tqdm
 from task.square import efficient_state_extraction
 import numpy as np
 
+import os
+import pathlib
+
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+import tensorflow as tf
+
+tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
+from tensorflow import keras
+# noinspection PyUnresolvedReferences
+from tensorflow.keras import layers
+
+from pathlib import Path
+import numpy as np
+
+
 
 def train_net(epochs: int,
               train_dataset: data.TensorDataset,
@@ -71,8 +86,9 @@ class CentralizedNet(torch.nn.Module):
         def fake_target_filter(targets):
             def f(state, sensing):
                 with torch.no_grad():
-                    return self(torch.FloatTensor(efficient_state_extraction(state)).flatten()) \
-                               .numpy().reshape(self.N, 2),
+                    net_output = self(torch.FloatTensor(efficient_state_extraction(state)).flatten()).numpy()
+                    # NEEDS CLIPPING
+                    return net_output.reshape(self.N, 2),
 
             return f
 

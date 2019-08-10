@@ -36,7 +36,15 @@ def load_non_sequential_dataset(name: str = '') -> Trace:
 def central_dataset(trace: Trace) -> TensorDataset:
     from task.square import efficient_trace_extraction
     raw = efficient_trace_extraction(trace.pos_state)
-    print(raw.shape, trace.control.shape)
+    print(f"Central dataset size x: {raw.shape}, y: {trace.control.shape})")
+    # Check that everything is correct
+    """
+    print(trace.pos_state[0, :, 0, 2],
+          trace.pos_state[0, :, 1, 2],
+          np.arctan2(trace.pos_state[0, :, 1, 0], trace.pos_state[0, :, 0, 0]))
+    print(raw[0])
+    print(trace.control[0])
+    """
     return TensorDataset(torch.FloatTensor(raw).flatten(start_dim=1),
                          torch.FloatTensor(trace.control).flatten(start_dim=1))
 
