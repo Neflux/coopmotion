@@ -3,18 +3,20 @@ from torch.utils.data import TensorDataset, Dataset
 from typing import Tuple, Sequence, Optional, List
 import numpy as np
 import h5py
-
+from tqdm import tqdm_notebook as tqdm
 from . import Run, Trace, prepare
+from task.square import extract_from_trace
 
 
 # Non sequential dataset
 def generate_randomstart_dataset(run: Run, number: int = 1) -> Trace:
-    traces = [run(T=0, epsilon=0) for _ in range(number)]
+    traces = [run(T=0, epsilon=0) for _ in tqdm(range(number))]
     return Trace(*[np.concatenate(x) for x in zip(*traces)])
+
 
 # Non sequential dataset
 def generate_non_sequential_dataset(run: Run, number: int = 1, epsilon: float = 0.01, name: str = '') -> Trace:
-    traces = [run(T=np.inf, epsilon=epsilon) for _ in range(number)]
+    traces = [run(T=np.inf, epsilon=epsilon) for _ in tqdm(range(number))]
 
     trace = [np.concatenate(x) for x in zip(*traces)]
     reindex = np.arange(len(trace[0]))
@@ -33,31 +35,26 @@ def load_non_sequential_dataset(name: str = '') -> Trace:
         return Trace(**{key: data[:] for key, data in f.items()})
 
 
-def central_dataset(trace: Trace) -> TensorDataset:
-    from task.square import efficient_trace_extraction
-    raw = efficient_trace_extraction(trace.pos_state)
-    print(f"Central dataset size x: {raw.shape}, y: {trace.control.shape})")
-    # Check that everything is correct
-    """
-    print(trace.pos_state[0, :, 0, 2],
-          trace.pos_state[0, :, 1, 2],
-          np.arctan2(trace.pos_state[0, :, 1, 0], trace.pos_state[0, :, 0, 0]))
-    print(raw[0])
-    print(trace.control[0])
-    """
-    return TensorDataset(torch.FloatTensor(raw).flatten(start_dim=1),
-                         torch.FloatTensor(trace.control).flatten(start_dim=1))
+def central_dataset(trace: Trace):
+    raw_pos_trace = extract_from_trace(trace.pos_state)
+
+    N = trace.pos_state.shape[1]
+    x = raw_pos_trace.reshape(-1, N * 3)
+    y = trace.control.reshape(-1, N * 2)
+
+    print(f"x {x.shape}\ty {y.shape}")
+    return x, y
 
 
-def distributed_dataset(trace: Trace) -> TensorDataset:
-    ss = trace.sensing
+def distributed_dataset(trace: Trace):
+
+    ss = trace.sensing[:, :, :, :2]
+    ss = ss.reshape(ss.shape[0] * ss.shape[1], ss.shape[2] * ss.shape[3])
+
     cs = trace.control
-
+    cs = cs.reshape(cs.shape[0] * cs.shape[1], cs.shape[2])
     print(ss.shape, cs.shape)
-    return TensorDataset(
-        torch.FloatTensor(ss.reshape(ss.shape[0]*ss.shape[1], ss.shape[2]*ss.shape[3])),
-        torch.FloatTensor(cs.reshape(cs.shape[0]*cs.shape[1], cs.shape[2]))
-    )
+    return ss, cs
 
 
 # Sequential dataset

@@ -1,16 +1,21 @@
+import os
+import pathlib
 from collections import OrderedDict
 
-from task.square import extract_xythetas, extract_xys
+from task.square import extract_tuple_from_state, extract_xys_from_state
 from . import Trace
 import numpy as np
 import matplotlib as mpl
 
 mpl.rcParams['savefig.pad_inches'] = 0
 from matplotlib import pyplot as plt
+
 plt.rcParams["animation.html"] = "jshtml"
 from matplotlib.lines import Line2D
 from matplotlib.animation import FuncAnimation
 from matplotlib import rc
+
+from utils import detailed_name
 
 
 def plot_task(ti_mat, tt, L=1, title=''):
@@ -24,15 +29,18 @@ def plot_task(ti_mat, tt, L=1, title=''):
     ax.axis("equal")
     ax.grid(True)
 
-    ti, angles = extract_xythetas(ti_mat)
+    ti, angles = extract_tuple_from_state(ti_mat)
 
     plt.plot(ti[:, 0], ti[:, 1], 'bo', ms=6, c='b', label='robots')
-    plt.plot(tt[:, 0], tt[:, 1], 'X', ms=6, c='r', label='targets')
+    plt.plot(tt[:, 0], tt[:, 1], 'X', ms=8, c='r', label='targets')
 
-    hattoro = np.array([[0, 0, 1], [0.1, 0, 1]]).T
+    x_axis = np.array([[0, 0, 1], [0.08, 0, 1]]).T
+    y_axis = np.array([[0, 0, 1], [0, 0.04, 1]]).T
     for f in ti_mat:
-        xhat = f @ hattoro
-        ax.plot(xhat[0, :], xhat[1, :], 'k-.')
+        xhat = f @ x_axis
+        yhat = f @ y_axis
+        ax.plot(xhat[0, :], xhat[1, :], 'r-')
+        ax.plot(yhat[0, :], yhat[1, :], 'g-')
 
     intent = [ax.add_line(
         Line2D([ti[j, 0], tt[j, 0]], [ti[j, 1], tt[j, 1]], linestyle='--', color='black', linewidth=1.5, alpha=0.8))
@@ -44,14 +52,81 @@ def plot_task(ti_mat, tt, L=1, title=''):
     plt.show()
 
 
-def plot_trace(trace: Trace, task, L: float = 1, show=False, save_to='') -> None:
+def plot_sensing(pos_state, sensing, L=1):
+    plt.figure(figsize=(6, 6))
+    ax = plt.gcf().gca()
 
+    ax.set_xlim([-0.5, L + 0.5])
+    ax.set_ylim([-0.5, L + 0.5])
+    ax.axis("equal")
+    ax.grid(True)
+
+    ti, angles = extract_tuple_from_state(pos_state)
+
+    plt.plot(ti[:, 0], ti[:, 1], 'bo', ms=6, c='b', label='robots')
+
+    x_axis = np.array([[0, 0, 1], [0.1, 0, 1]]).T
+    y_axis = np.array([[0, 0, 1], [0, 0.1, 1]]).T
+
+    xys = extract_xys_from_state(pos_state)
+
+    for i, f in enumerate(pos_state):
+        xhat = f @ x_axis
+        yhat = f @ y_axis
+        ax.plot(xhat[0, :], xhat[1, :], 'r-')
+        ax.plot(yhat[0, :], yhat[1, :], 'g-')
+        ax.text(f[0, 2] + 0.05, f[1, 2], str(i), zorder=5, fontsize=18)
+
+        for j, rel_neighbor in enumerate(sensing[i]):
+            abs_neighbor = (rel_neighbor @ np.linalg.inv(f)) + f[:, 2]
+            ax.add_line(Line2D([xys[i, 0], abs_neighbor[0]], [xys[i, 1], abs_neighbor[1]],
+                               linestyle='--', color='grey', linewidth=1.0, alpha=0.7))
+            # if i == 1:
+            #     with np.printoptions(precision=2, suppress=True):
+            #         ax.text((xys[i, 0] + abs_neighbor[0]) / 2, (xys[i, 1] + abs_neighbor[1]) / 2, f"{rel_neighbor}")
+
+    # plt.axis('off')
+    plt.title('Sensing')
+    plt.legend()
+    plt.show()
+
+
+def training_plot(history, context=None):
+    fig, axs = plt.subplots(1, 2, figsize=(15, 5))
+
+    # Plot training & validation loss values
+    axs[0].plot(history.history['loss'])
+    axs[0].plot(history.history['val_loss'])
+    axs[0].set_title('Model loss')
+    axs[0].set_ylabel('Loss')
+    axs[0].set_xlabel('Epoch')
+    axs[0].legend(['Training', 'Validation'], loc='upper right')
+
+    # Plot training & validation accuracy values
+    axs[1].plot(history.history['acc'])
+    axs[1].plot(history.history['val_acc'])
+    axs[1].set_title('Model accuracy')
+    axs[1].set_ylabel('Accuracy')
+    axs[1].set_xlabel('Epoch')
+    axs[1].legend(['Training', 'Validation'], loc='upper right')
+
+    plt.show()
+
+    if context is not None:
+        folder = os.path.join('images', 'training')
+        path = os.path.join(folder, detailed_name(context) + '.png')
+        print(f"Saved in {path}")
+        pathlib.Path(folder).mkdir(parents=True, exist_ok=True)
+        plt.savefig(path)
+
+
+def plot_trace(trace: Trace, task, L: float = 1, show=False, context=None):
     if len(trace.communication[0]) > 0:
         n = 4
     else:
         n = 3
     fig, axs = plt.subplots(1, n, figsize=(16, 5))
-    tracestate = np.array([extract_xys(s) for s in trace.pos_state])
+    tracestate = np.array([extract_xys_from_state(s) for s in trace.pos_state])
     axs[0].plot(tracestate[:, :, 0], tracestate[:, :, 1], '.-')
     axs[0].plot(tracestate[-1, :, 0], tracestate[-1, :, 1], 'bo', c='b', ms=7)
     axs[0].plot(task.targets[:, 0], task.targets[:, 1], 'X', c='r', ms=7)
@@ -74,7 +149,7 @@ def plot_trace(trace: Trace, task, L: float = 1, show=False, save_to='') -> None
 
     handles, labels = axs1b.get_legend_handles_labels()
     by_label = OrderedDict(zip(labels, handles))
-    axs1b.legend(by_label.values(), by_label.keys(), loc = 'lower right')
+    axs1b.legend(by_label.values(), by_label.keys(), loc='lower right')
 
     axs[2].plot(trace.error, trace.time, 'k.-')
     axs[2].set_ylabel('time')
@@ -85,18 +160,22 @@ def plot_trace(trace: Trace, task, L: float = 1, show=False, save_to='') -> None
         axs[-1].set_xlabel('time')
         axs[-1].set_title('communication')
 
-    if save_to != '':
-        plt.savefig(save_to)
+    if context is not None:
+        folder = os.path.join('images', 'trace')
+        path = os.path.join(folder, detailed_name(context) + '.png')
+        print(f"Saved in {path}")
+        pathlib.Path(folder).mkdir(parents=True, exist_ok=True)
+        plt.savefig(path)
     if show:
         plt.show()
 
 
-def animate_with_targets(trace: Trace, sensor, show=False, save_to: str = '', dt: int = 0.1, L: float = 1):
+def animate_with_targets(trace: Trace, sensor, show=False, context=None, dt: int = 0.1, L: float = 1):
     dev_room = [L * 3, L * 3]
 
     fig = plt.figure(figsize=(7, 7))
 
-    extra = 0.2
+    extra = 0.5
     ax = fig.add_subplot(aspect='equal', autoscale_on=True,
                          xlim=np.array([0, L]) + [-extra, +extra],
                          ylim=np.array([0, L]) + [-extra, +extra])
@@ -115,7 +194,7 @@ def animate_with_targets(trace: Trace, sensor, show=False, save_to: str = '', dt
               for _ in range(n_robots)]
 
     orientation = [ax.add_line(Line2D([], [], linestyle='-.', color='black', linewidth=3, zorder=5))
-              for _ in range(n_robots)]
+                   for _ in range(n_robots)]
 
     robotext = [ax.text(dev_room[0], dev_room[1], i,
                         ha="center", fontweight='bold', fontsize=20, zorder=2) for i in range(n_robots)]
@@ -129,7 +208,6 @@ def animate_with_targets(trace: Trace, sensor, show=False, save_to: str = '', dt
     commtext = [ax.text(dev_room[0], dev_room[1], '', color='black', ha='center', va='center',
                         bbox=dict(facecolor='none', edgecolor='blue'))
                 for i in range(n_robots)]
-
 
     if "range" in sensor.__qualname__:
         range_radius = sensor.get_params()
@@ -152,7 +230,7 @@ def animate_with_targets(trace: Trace, sensor, show=False, save_to: str = '', dt
         pos_state = trace.pos_state[i]
         optimal_state = trace.targets[i]
 
-        xys, thetas = extract_xythetas(pos_state)
+        xys, thetas = extract_tuple_from_state(pos_state)
         robots.set_data(xys[:, 0], xys[:, 1])
 
         targets.set_data(optimal_state[:, 0], optimal_state[:, 1])
@@ -208,11 +286,35 @@ def animate_with_targets(trace: Trace, sensor, show=False, save_to: str = '', dt
     ani = FuncAnimation(fig, update, frames=len(trace.pos_state),
                         init_func=init, blit=True, interval=1000 * dt)
 
-    if save_to:
-        ani.save(save_to)
+    if context is not None:
+        folder = os.path.join('videos')
+        path = os.path.join(folder, detailed_name(context) + '.mp4')
+        print(f"Saved in {path}")
+        pathlib.Path(folder).mkdir(parents=True, exist_ok=True)
+        ani.save(path)
     if show:
         plt.show()
     plt.close(fig)
 
     rc('animation', html='jshtml')
     return ani
+
+
+def plot_error(time, error, context=None, **kwargs):
+    m = np.mean(error, axis=0)
+    q95 = np.quantile(error, 0.95, axis=0)
+    q5 = np.quantile(error, 0.05, axis=0)
+    label = kwargs.pop('label', '')
+    plt.plot(time, m, '-', label=label, **kwargs)
+    plt.fill_between(time, q5, q95, alpha=0.1, **kwargs)
+
+    if context is not None:
+        plt.legend()
+        plt.savefig('centralized')
+        plt.title('Error')
+
+        folder = os.path.join('images', 'error')
+        path = os.path.join(folder, detailed_name(context) + '.png')
+        print(f"Saved in {path}")
+        pathlib.Path(folder).mkdir(parents=True, exist_ok=True)
+        plt.savefig(path)

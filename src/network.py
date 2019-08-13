@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from torch.utils import data
 from tqdm import tqdm
 # from tqdm import tqdm_notebook as tqdm
-from task.square import efficient_state_extraction
+from task.square import extract_from_state
 import numpy as np
 
 import os
@@ -86,7 +86,7 @@ class CentralizedNet(torch.nn.Module):
         def fake_target_filter(targets):
             def f(state, sensing):
                 with torch.no_grad():
-                    net_output = self(torch.FloatTensor(efficient_state_extraction(state)).flatten()).numpy()
+                    net_output = self(torch.FloatTensor(extract_from_state(state)).flatten()).numpy()
                     # NEEDS CLIPPING
                     return net_output.reshape(self.N, 2),
 
@@ -118,8 +118,6 @@ class DistributedNet(torch.nn.Module):
                 with torch.no_grad():
                     net_output = self(torch.FloatTensor(
                         sensing.reshape(sensing.shape[0], sensing.shape[1] * sensing.shape[2]))).numpy()
-                    net_output[:, 0] = np.clip(net_output[:, 0], -0.5, 0.5)
-                    net_output[:, 1] = np.clip(net_output[:, 1], -np.pi, np.pi)
                     return net_output.reshape(-1, 2),
 
             return f

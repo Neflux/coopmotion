@@ -10,39 +10,33 @@ RADIUS = lambda L: L / 2.
 """ ROTOTRANSLATION UTILS """
 
 
-def extract_xy(mat):
-    return mat[0, 2], mat[1, 2]
+def extract_xys_from_state(mats):
+    return np.vstack([mats[:, 0, 2], mats[:, 1, 2]]).T
 
 
-def extract_xys(mats):
-    return np.array([extract_xy(r) for r in mats])
+def extract_thetas_from_state(mats):
+    return np.arctan2(mats[:, 1, 0], mats[:, 0, 0])
 
 
-# TODO: check this is correct
-def extract_theta(mat):
-    return np.arctan2(mat[1, 0], mat[0, 0])
+def extract_from_state(mats):
+    # N x 3 x 3 -> N x 3
+    return np.stack([mats[:, 0, 2], mats[:, 1, 2], np.arctan2(mats[:, 1, 0], mats[:, 0, 0])], 1)
 
 
-def extract_thetas(mats):
-    return np.array([extract_theta(r) for r in mats])
+def extract_tuple_from_mat(mat):
+    # 3 x 3 -> (2, 1) = (xy, theta)
+    return [mat[0, 2], mat[1, 2]], np.arctan2(mat[1, 0], mat[0, 0])
+
+def extract_tuple_from_state(mats):
+    # N x 3 x 3 -> (N x 2, N x 1) = (xy, theta)
+    return np.vstack([mats[:, 0, 2], mats[:, 1, 2]]).T, np.arctan2(mats[:, 1, 0], mats[:, 0, 0])
 
 
-def extract_xytheta(mat):
-    return extract_xy(mat), extract_theta(mat)
-
-
-def extract_xythetas(mats):
-    return np.array([extract_xy(r) for r in mats]), np.array([extract_theta(r) for r in mats])
-
-def efficient_state_extraction(mats):
-    return np.stack([mats[:, 0, 2],
-                      mats[:, 1, 2],
-                      np.arctan2(mats[:, 1, 0], mats[:, 0, 0])],1)
-
-def efficient_trace_extraction(matss):
+def extract_from_trace(matss):
+    # n x N x 3 x 3 -> n x N x (2+1)
     return np.stack([matss[:, :, 0, 2],
-                      matss[:, :, 1, 2],
-                      np.arctan2(matss[:, :, 1, 0], matss[:, :, 0, 0])],2)
+                     matss[:, :, 1, 2],
+                     np.arctan2(matss[:, :, 1, 0], matss[:, :, 0, 0])], 2)
 
 
 def mktr(x, y):
@@ -58,9 +52,12 @@ def mkrot(theta):
 
 
 def mkultra(x, y, theta):
+    """
     return np.array([[np.cos(theta), -np.sin(theta), x],
                      [np.sin(theta), np.cos(theta), y],
-                     [0, 0, 1]])
+                     [0, 0, 1]]))
+    """
+    return mktr(x, y) @ mkrot(theta)
 
 
 def mk_from_vel(lin_vel, ang_vel):
@@ -107,21 +104,20 @@ def angle_difference(angle1, angle2):
     return np.arctan2(np.sin(angle1 - angle2), np.cos(angle1 - angle2))
 
 
-
-def proportional(max_speed: float = 1.0, kp: float = 1.0):
+def proportional(max_speed: float = 1.0, tau: float = 1.0):
     def c(_input: float) -> float:
-        return max_speed * np.clip(kp * (_input), -1, 1)
+        return max_speed * np.clip(_input / tau, -1, 1)
 
     return c
 
 
 def position_controller(controller):
     def target_filter(targets):
-        lcs = [controller(max_speed=0.5, kp=1.) for _ in targets]
-        acs = [controller(max_speed=np.pi, kp=1.) for _ in targets]
+        lcs = [controller(tau=2) for _ in targets]
+        acs = [controller(tau=0.3) for _ in targets]
 
-        def mc(xs, ss):
-            xys, thetas = extract_xythetas(xs)
+        def mc(pos, ss):
+            xys, thetas = extract_tuple_from_state(pos)
             return np.array([(lc(euclidean_distance(xy, target)),
                               ac(angle_difference(steering_angle(xy, target), theta)))
                              for lc, ac, xy, theta, target in zip(lcs, acs, xys, thetas, targets)]),
@@ -141,30 +137,42 @@ def skip_diag_strided(A):
     return strided(A.ravel()[1:], shape=(m - 1, m), strides=(s0 + s1, s1)).reshape(m, -1)
 
 
-#TODO: what about sensing also the neighbors orientation?
+# TODO: what about sensing also the neighbors orientation?
 def sense_all():
-    def sense(positions):
-        xys = extract_xys(positions)
-        N = len(xys)
+    def sense(positions): # N x 3 x 3
+        N = len(positions)
 
-        n_closest = skip_diag_strided(np.tile(np.arange(N), (N, 1)))
-        result = xys[n_closest]
-        # WORK IN PROGRESS
-        tmp = positions[idx] @ np.hstack([result[idx, idy], 1]).T
-        result[idx, idy] = tmp[:2].T
+        # Ids of the other robots for each robot N x (N-1)
+        sensing_ids = skip_diag_strided(np.tile(np.arange(N), (N, 1)))
+        # Extracted positions N x 2
+        xys = extract_xys_from_state(positions)
+        # Duplicated absolute positions to perform the subtraction trick N x (N-1) x 2
+        protagonist = np.moveaxis(np.repeat(xys, N - 1, axis=1).reshape(N, 2, 3), 1, 2)
+        # Subtraction trick: actually obtaining the deltas N x (N-1) x 2
+        deltas_xys = xys[sensing_ids] - protagonist
+        # Trailing ones for correct matrix multiplications N x (N-1) x 3
+        deltas_xys_one = np.dstack([deltas_xys, np.ones((N, N - 1))])
+        # Final step: matmul N x (N-1) x 3
+        return np.array([[neighbor_delta @ pos for neighbor_delta in neighbors]
+                           for pos, neighbors in zip(positions, deltas_xys_one)])
 
-        return np.dstack([result, in_range])
-
-    sense.get_input_size = lambda n: (n - 1) * 2
+    #sense.get_input_size = lambda n: (n - 1) * 2
     sense.get_params = lambda: ''
     return sense
 
 
-#TODO: what about sensing also the neighbors orientation?
+# result = np.array(
+#     [pos @ abs_neighbor_pos for pos, neighbors in zip(positions, positions[sensing_ids]) for abs_neighbor_pos in
+#      neighbors])
+# result = result.reshape(N, N - 1, 3, 3)
+
+
+# TODO: what about sensing also the neighbors orientation?
 def sense_in_range(T=1):
     def sense(positions):
-        xys = extract_xys(positions)
+        xys = extract_xys_from_state(positions)
         N = len(xys)
+        """
         d = distance.cdist(xys, xys)
         d[d > T] = np.inf
 
@@ -182,8 +190,9 @@ def sense_in_range(T=1):
                     tmp = positions[idx] @ np.hstack([result[idx, idy], 1]).T
                     result[idx, idy] = tmp[:2].T
                     in_range[idx, idy] = 1.
+        """
 
-        return np.dstack([result, in_range])
+        # return np.dstack([result, in_range])
 
     sense.get_input_size = lambda n: (n - 1) * 3
     sense.get_params = lambda: T
@@ -201,7 +210,7 @@ class StaticPositionTask(Task):
 
     def initialize(self):
         self.initial_poses = random_robot_poses(self.L, self.N)
-        distances = distance.cdist(self.target_xys, extract_xys(self.initial_poses), 'euclidean')
+        distances = distance.cdist(self.target_xys, extract_xys_from_state(self.initial_poses), 'euclidean')
         row_ind, col_ind = linear_sum_assignment(distances)
         self.initial_poses = self.initial_poses[col_ind, :]
         return self.initial_poses
@@ -210,7 +219,7 @@ class StaticPositionTask(Task):
         return c
 
     def distance(self, positions):
-        return np.max(np.abs(self.target_xys - np.array(extract_xys(positions))))
+        return np.max(np.abs(self.target_xys - np.array(extract_xys_from_state(positions))))
 
     @property
     def targets(self):
@@ -233,7 +242,7 @@ class SmartStaticPositionTask(Task):
         return c
 
     def distance(self, positions):
-        return np.max(np.abs(self.target_xys - np.array(extract_xys(positions))))
+        return np.max(np.abs(self.target_xys - np.array(extract_xys_from_state(positions))))
 
     @property
     def targets(self):
@@ -258,7 +267,7 @@ class DynamicPositionTask(Task):
         return sc(self.target_xys)
 
     def distance(self, positions):
-        return np.max(np.abs(self.target_xys - np.array(extract_xys(positions))))
+        return np.max(np.abs(self.target_xys - np.array(extract_xys_from_state(positions))))
 
     @property
     def targets(self):
@@ -310,16 +319,16 @@ def ClosestPoints(positions, targets):
 
 
 def hungarian_ICP(positions, targets, n, show=False):
-    xys, angles = extract_xythetas(positions)
+    xys, angles = extract_tuple_from_state(positions)
     if show:
         from task.fancy import plot_task
         plot_task(positions, targets, title=f'Original')
-    # targets = hungarian(xys,targets)
+    targets = hungarian(xys, targets)
     for i in range(n):
         targets = ClosestPoints(xys, targets)
         if show:
             plot_task(positions, targets, title=f'ClosestPoints #{i + 1}')
-    targets = hungarian(xys, targets)
+        targets = hungarian(xys, targets)
     if show:
         plot_task(positions, targets, title=f'Hungarian')
     return targets
@@ -333,7 +342,8 @@ def hungarian(positions, targets):
 
 def dynamic(dt=0.1):
     def update(pos_state, cs):
-        return np.array([pose @ mk_from_vel(dt * vel[0], dt * vel[1]) for pose, vel in zip(pos_state, cs)])
+        return np.array([pose @ mk_from_vel(dt * vel[0], dt * vel[1])
+                         for pose, vel in zip(pos_state, cs)])
 
     return update
 
