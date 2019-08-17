@@ -1,32 +1,36 @@
-from typing import NamedTuple, List
+from typing import NamedTuple, List, Callable
 
 import numpy as np
 from abc import ABC, abstractmethod
 
+from task.square import h_dynamic, nh_dynamic
+
+
 class Task(ABC):
-
+    target_xys: np.ndarray
+    initial: Callable
+    holonomic: bool
 
     @abstractmethod
-    def initialize(self):
+    def h(self):
         ...
 
     @abstractmethod
-    def update_targets(self, controller, super_controller) -> float:
-        ...
-
-    @property
-    @abstractmethod
-    def targets(self):
+    def nh(self):
         ...
 
     @abstractmethod
-    def distance(self, state) -> float:
+    def update(self):
+        ...
+
+    @abstractmethod
+    def distance(self):
         ...
 
 
 class Trace(NamedTuple):
     time:           np.ndarray
-    pos_state:      np.ndarray
+    state:          np.ndarray
     communication:  np.ndarray
     sensing:        np.ndarray
     control:        np.ndarray
@@ -48,7 +52,7 @@ def prepare(trace: Trace, steps = None, padding: bool = False,
                 else:
                     dt = default_dt
                 items = [np.arange(0, dt * steps, dt)]
-                # pad with (pos_state, communication, sensing, 0, targets, error)
+                # pad with (state, communication, sensing, 0, targets, error)
                 n = steps - len(trace.time)
                 for data, k in zip(trace[1:], [1, 1, 1, 0, 1, 1]):
                     last = [data[-1] * k for _ in range(n)]
@@ -59,31 +63,36 @@ def prepare(trace: Trace, steps = None, padding: bool = False,
 
 class Run:
 
-    def __init__(self, task: Task, controller, dynamic,
+    def __init__(self, task: Task, controller,
                  sensor, dt: float = 0.1):
         self.task = task
         self.super_controller = controller
-        self.dynamic = dynamic
+        self.dynamic = h_dynamic(dt) if task.holonomic else nh_dynamic(dt)
         self.sensor = sensor
         self.dt = dt
 
     def __call__(self, epsilon: float = 0.01, T: float = np.inf) -> Trace:
 
-        t = 0.0
-        pos_state = self.task.initialize()
-        self.controller = self.super_controller(self.task.targets)
-        steps: List[Trace] = []
-        error = self.task.distance
-        e = error(pos_state)
-        while (e > epsilon and t < T) or t == 0:
+        state, targets = self.task.initial()
+        controller = self.super_controller(targets)
+        error = self.task.distance()
+        update = self.task.update()
 
-            sensing = self.sensor(pos_state)
-            control, *communication = self.controller(pos_state, sensing)
+        t = 0.0
+        steps: List[Trace] = []
+        e = error(state)
+        while (e > epsilon and t < T) or t == 0:
+            # Acquire sensing info from simulation state
+            sensing = self.sensor(state)
+            # Acquire control decision from state/sensing, depending on the controller
+            control, *communication = controller(state, sensing)
             if communication:
                 communication = communication[0]
-            steps.append(Trace(t, pos_state, communication, sensing, control, self.task.targets, e))
-            pos_state = self.dynamic(pos_state, control)
-            self.controller = self.task.update_targets(self.controller, self.super_controller)
+            steps.append(Trace(t, state, communication, sensing, control, self.task.target_xys, e))
+            # Update simulation state
+            state = self.dynamic(state, control)
+            # Optional task update of targets and therefore optimal controllers
+            controller = update(controller, self.super_controller)
             t += self.dt
-            e = error(pos_state)
+            e = error(state)
         return Trace(*[np.array(x) for x in zip(*steps)])

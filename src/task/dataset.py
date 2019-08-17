@@ -4,6 +4,8 @@ from typing import Tuple, Sequence, Optional, List
 import numpy as np
 import h5py
 from tqdm import tqdm_notebook as tqdm
+
+from task.math import is_homogenous
 from . import Run, Trace, prepare
 from task.square import extract_from_trace
 
@@ -16,7 +18,7 @@ def generate_randomstart_dataset(run: Run, number: int = 1) -> Trace:
 
 # Non sequential dataset
 def generate_non_sequential_dataset(run: Run, number: int = 1, epsilon: float = 0.01, name: str = '') -> Trace:
-    traces = [run(T=np.inf, epsilon=epsilon) for _ in tqdm(range(number))]
+    traces = [run(T=10., epsilon=epsilon) for _ in tqdm(range(number))]
 
     trace = [np.concatenate(x) for x in zip(*traces)]
     reindex = np.arange(len(trace[0]))
@@ -36,11 +38,16 @@ def load_non_sequential_dataset(name: str = '') -> Trace:
 
 
 def central_dataset(trace: Trace):
-    raw_pos_trace = extract_from_trace(trace.pos_state)
+    N = trace.state.shape[1]
+    tracestate = trace.state
+    if is_homogenous(trace.state):
+        tracestate = extract_from_trace(trace.state)
 
-    N = trace.pos_state.shape[1]
-    x = raw_pos_trace.reshape(-1, N * 3)
-    y = trace.control.reshape(-1, N * 2)
+        x = tracestate.reshape(-1, N * 3)
+        y = trace.control.reshape(-1, N * 2)
+    else:
+        x = tracestate.reshape(-1, N * 2)
+        y = trace.control.reshape(-1, N * 2)
 
     print(f"x {x.shape}\ty {y.shape}")
     return x, y

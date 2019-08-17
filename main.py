@@ -8,7 +8,7 @@ import sys
 
 sys.path.append('coopmotion/src')
 
-from network import train_net, CentralizedNet, EnhancedDistributedNet
+from pytorch_network import train_net, CentralizedNet, EnhancedDistributedNet
 from com_network import ComNet
 from task.dataset import *
 from task.dataset import generate_sequential_dataset

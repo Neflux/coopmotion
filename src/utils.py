@@ -6,9 +6,13 @@ def detailed_name(g):
             if k == 'net':
                 final[k] = type(v).__name__
             elif k == 'run':
-                final['t'] = type(v.task).__name__
-                mode = v.sensor.__qualname__[6:v.sensor.__qualname__.find('.')]
-                final['s'] = f"{mode}-{v.sensor.get_params()}"
+                final['t'] = f"\b\b{'holo-' if v.task.holonomic else 'nonholo-'}{type(v.task).__name__}"
+                sense_info = {'range': v.sensor.range, 'subs': v.sensor.subset}
+                for k2, v2 in sense_info.items():
+                    if v2 is not None:
+                        final[k2] = v2
+                if v.sensor.sorted:
+                    final['sorted'] = '\b'
             elif k == 'number_of_samples':
                 final['n'] = v
             else:

@@ -26,9 +26,10 @@ class PrintDot(keras.callbacks.Callback):
 
 
 class Net:
-    def __init__(self, input_size, output_size):
+    def __init__(self, input_size, output_size, holonomic):
         self.input_size = input_size
         self.output_size = output_size
+        self.holonomic = holonomic
 
         self.model = keras.Sequential([
             layers.Dense(64, activation=tf.nn.tanh, input_shape=(input_size,)),
@@ -47,11 +48,10 @@ class Net:
     def train(self, epochs, train_dataset, test_dataset, batch_size=None):
         x, y = train_dataset
         train_history = self.model.fit(x, y, epochs=epochs, batch_size=batch_size, shuffle=True, validation_split=0.2,
-                                       verbose=0, callbacks=[self.early_stop, PrintDot(epochs)])
+                                       verbose=1, callbacks=[self.early_stop])
 
         x, y = test_dataset
-        test_results = self.model.evaluate(x, y, batch_size=batch_size, verbose=0,
-                                           callbacks=[self.early_stop, PrintDot(epochs)])
+        test_results = self.model.evaluate(x, y, batch_size=batch_size, verbose=0)
 
         [print(f"\r{name}: {value:.2f}") for value, name in
          zip(test_results, ['mean_squared_error', 'mean_absolute_error', 'mean_squared_error', 'accuracy'])]
@@ -63,29 +63,43 @@ class Net:
 
     def controller(self):
         def fake_target_filter(targets):
-            return self.f
-
+            return self.h_controller if self.holonomic else self.nh_controller
         return fake_target_filter
 
     @abstractmethod
-    def f(self, state, sensing):
+    def h_controller(self, state, sensing):
+        ...
+
+    @abstractmethod
+    def nh_controller(self,state, sensing):
         ...
 
 
 class CentralizedNet(Net):
-    def __init__(self, N):
+    def __init__(self, N, holonomic):
         self.N = N
-        super().__init__(N * 3, N * 2)
+        input_size = N * 2 if holonomic else N * 3
+        super().__init__(input_size, N * 2, holonomic)
 
-    def f(self, state, sensing):
+    def h_controller(self, state, sensing):
+        return self.predict(state.reshape(-1, self.N * 2)).reshape(self.N, 2),
+
+    def nh_controller(self, state, sensing):
         return self.predict(extract_from_state(state).reshape(-1, self.N * 3)).reshape(self.N, 2),
 
 
-class DistributedNet(Net):
-    def __init__(self, input_size):
-        super().__init__(input_size, 2)
 
-    def f(self, state, sensing):
+class DistributedNet(Net):
+    def __init__(self, run):
+        self.N = run.task.N
+        input_size = run.sensor.get_input_size(self.N)
+        super().__init__(input_size, 2, run.task.holonomic)
+
+    def h_controller(self, state, sensing):
+        return self.predict(sensing.reshape(self.N, -1)).reshape(self.N, 2),
+
+    def nh_controller(self, state, sensing):
         ss = sensing[:, :, :2]
         ss = ss.reshape(ss.shape[0], ss.shape[1] * ss.shape[2])
         return self.predict(ss).reshape(-1, 2),
+
