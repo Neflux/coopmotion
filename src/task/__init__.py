@@ -92,7 +92,7 @@ class Run:
             # Update simulation state
             state = self.dynamic(state, control)
             # Optional task update of targets and therefore optimal controllers
-            controller = update(controller, self.super_controller)
+            controller, self.task.target_xys = update(controller, self.super_controller, state)
             t += self.dt
             e = error(state)
         return Trace(*[np.array(x) for x in zip(*steps)])

@@ -64,9 +64,9 @@ def proportional(target_xys, max_speed: float = 1.0, tau: float = 1.0, fn=lambda
 
 def nh_position_controller(controller, max_speed: float = 1.0):
     def target_filter(targets):
-        lcs = [controller(t, max_speed=max_speed, tau=2,
+        lcs = [controller(t, max_speed=max_speed, tau=4,
                           fn=lambda x, y: euclidean_distance(x[:2, 2], y)) for t in targets]
-        acs = [controller(t, max_speed=max_speed, tau=0.3,
+        acs = [controller(t, max_speed=max_speed, tau=0.1,
                           fn=lambda x, y: angle_difference(steering_angle(x[:2, 2], y), np.arctan2(x[1, 0], x[0, 0])))
                for t in targets]
 
@@ -202,7 +202,7 @@ class StaticPositionTask(Task):
         return self.initial_state, self.target_xys
 
     def update(self):
-        return lambda c, sc: c
+        return lambda c, sc, state: c, self.target_xys
 
     def distance(self):
         if self.holonomic:
@@ -234,9 +234,15 @@ class AdaptivePositionTask(Task):
 
     def update(self):
         if self.holonomic:
-            return lambda c, sc: sc(hICP(self.initial_state, self.target_xys))
+            def f(c,sc,state):
+                tmp = hICP(state, self.target_xys)
+                return sc(tmp), tmp
+            return f
         else:
-            return lambda c, sc: sc(nhICP(self.initial_state, self.target_xys))
+            def f(c, sc, state):
+                tmp = nhICP(state, self.target_xys)
+                return sc(tmp), tmp
+            return f
 
     def distance(self):
         if self.holonomic:

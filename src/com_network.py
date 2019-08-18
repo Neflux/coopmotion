@@ -14,7 +14,7 @@ from task.square import skip_diag_strided
 class SNet(nn.Module):
     def __init__(self, N: int, broadcast: int):
         super(SNet, self).__init__()
-        # dx dy is_in_range comm * (4-1)
+        # dx dy is_in_range comm * (N-1)
         self.l1 = torch.nn.Linear((N - 1) * (3 + broadcast), 64)
         self.l2 = torch.nn.Linear(64, 64)
         self.l3 = torch.nn.Linear(64, 2 + broadcast)

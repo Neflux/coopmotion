@@ -239,10 +239,10 @@ def animate_with_targets(trace: Trace, sensor, show=False, context=None, dt: int
                         bbox=dict(facecolor='none', edgecolor='blue'))
                 for i in range(n_robots)]
 
-    if "range" in sensor.__qualname__:
-        range_radius = sensor.get_params()
-    else:
-        range_radius = L * 6
+    range_radius = L * 6
+    if sensor.range is not None:
+        range_radius = sensor.range
+
 
     circles = [ax.add_artist(plt.Circle(dev_room, range_radius, color='b', linestyle='dotted',
                                         alpha=0.5, fill=False)) for r in range(n_robots)]

@@ -33,10 +33,11 @@ def train_net(epochs: int,
               learning_rate: float = 0.001,
               training_loss: Optional[List[float]] = None,
               testing_loss: Optional[List[float]] = None) -> Tuple[List[float], List[float]]:
-    x_train, y_train = train_dataset
-    x_test, y_test = test_dataset
-    train_dataset = TensorDataset(torch.FloatTensor(x_train), torch.FloatTensor(y_train))
-    test_dataset = TensorDataset(torch.FloatTensor(x_test), torch.FloatTensor(y_test))
+
+    # x_train, y_train = train_dataset
+    # x_test, y_test = test_dataset
+    # train_dataset = TensorDataset(torch.FloatTensor(x_train), torch.FloatTensor(y_train))
+    # test_dataset = TensorDataset(torch.FloatTensor(x_test), torch.FloatTensor(y_test))
     dl = data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
     tdl = data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False, drop_last=True)
     optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate)

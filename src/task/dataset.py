@@ -18,12 +18,12 @@ def generate_randomstart_dataset(run: Run, number: int = 1) -> Trace:
 
 # Non sequential dataset
 def generate_non_sequential_dataset(run: Run, number: int = 1, epsilon: float = 0.01, name: str = '') -> Trace:
-    traces = [run(T=10., epsilon=epsilon) for _ in tqdm(range(number))]
+    traces = [run(T=2., epsilon=epsilon) for _ in tqdm(range(number))]
 
     trace = [np.concatenate(x) for x in zip(*traces)]
-    reindex = np.arange(len(trace[0]))
-    np.random.shuffle(reindex)
-    trace = [x[reindex] for x in trace]
+    #reindex = np.arange(len(trace[0]))
+    #np.random.shuffle(reindex)
+    #trace = [x[reindex] for x in trace]
     trace = Trace(*trace)
     if name:
         with h5py.File(f"{name}.hdf5", "w") as f:
@@ -67,7 +67,7 @@ def distributed_dataset(trace: Trace):
 # Sequential dataset
 def generate_sequential_dataset(run: Run, number: int = 1, name: str = '',
                                 duration: float = np.inf, epsilon: float = 0.01) -> List[Trace]:
-    traces = [run(epsilon=epsilon, T=duration) for i in range(number)]
+    traces = [run(epsilon=0, T=1) for i in tqdm(range(number))]
     if name:
         with h5py.File(f"{name}.hdf5", "w") as f:
             for i, trace in enumerate(traces):
