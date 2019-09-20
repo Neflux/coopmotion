@@ -29,8 +29,8 @@ def generate_non_sequential_dataset(run: Run, number: int = 1, epsilon: float = 
     while True:
         tr = run(T=duration, epsilon=epsilon, seed=np.random.randint(0xDEADBEEF))
         if keep is not None:
-            skipper = int(1. / keep)
-            tr = Trace(*[x[0][::skipper] for x in zip(tr)])
+            idx = np.round(np.linspace(0, len(tr.time) - 1, int(keep*len(tr.time)))).astype(int)
+            tr = Trace(*[x[0][idx] for x in zip(tr)])
         traces.append(tr)
         tr_length = len(traces[-1].time)
         pbar.update(tr_length)
@@ -116,7 +116,8 @@ def generate_sequential_dataset(run: Run,  number: int = 1,steps=None,  name: st
             micro_traces = [Trace(*[prop[0][i:i + steps] for prop in zip(tr)])
                                  for i in np.arange(0, len(tr.state), steps) if i + steps < len(tr.state)]
             if keep is not None:
-                micro_traces = micro_traces[::int(1. / keep)]
+                idx = np.round(np.linspace(0, len(tr.time) - 1, int(keep * len(tr.time)))).astype(int)
+                micro_traces = micro_traces[idx]
             traces.extend(micro_traces)
             new_samples = len(micro_traces)
             pbar.update(new_samples)
