@@ -18,13 +18,12 @@ class SNet(nn.Module):
         self.l1 = torch.nn.Linear((N - 1) * (3 + broadcast), 64)
         self.l2 = torch.nn.Linear(64, 64)
         self.l3 = torch.nn.Linear(64, 2 + broadcast)
-        self.input_size = (N - 1) * 4
+        self.input_size = (N - 1) * (3 + broadcast)
 
-        self.drop_layer = torch.nn.Dropout(0.3)
 
     def forward(self, xs):
-        ys = self.drop_layer(torch.tanh(self.l1(xs)))
-        ys = self.drop_layer(torch.tanh(self.l2(ys)))
+        ys = torch.tanh(self.l1(xs))
+        ys = torch.tanh(self.l2(ys))
         return self.l3(ys)
 
 
@@ -38,12 +37,12 @@ class ComNet(nn.Module):
         self.N = N
         self.broadcast = broadcast
 
-        self.n_closest = skip_diag_strided(np.tile(np.arange(N), (N, 1)))
+        self.n_closest = np.array([[j for j in range(N) if j != i] for i in range(N)])
 
     def init_comm(self):
-        return np.random.uniform(1, 2, (self.broadcast, self.N))
+        # return np.random.uniform(1, 2, (self.broadcast, self.N))
         # return np.zeros(shape=(self.broadcast, self.N))
-        # return Variable(torch.Tensor([0] * N))
+        return Variable(torch.zeros((self.broadcast, self.N)))
 
     def input_local_comm(self, ss, comm, i):
         # TODO: detach from GPU to do advanced indexing with np? really?
@@ -56,13 +55,13 @@ class ComNet(nn.Module):
 
     def input_global_comm(self, ss, comm, i):
         rel_comm = comm[:, self.n_closest[i]]
-        return torch.cat([ss[i].flatten(), torch.tensor(rel_comm.flatten()).float()], 0)
+        return torch.cat([ss[i].flatten(), rel_comm.flatten().float()], 0)
 
     def step(self, xs, comm):
         cs = []
         for i in list(range(self.N)):
             output = self.single_net(self.input_global_comm(xs, comm, i))
-            comm[:, i] = output[2:].detach().numpy()
+            comm[:, i] = output[2:]
             cs.append(output[:2])
         return torch.cat(cs, 0)
 
@@ -85,7 +84,7 @@ class ComNet(nn.Module):
                 with torch.no_grad():
                     sensing = torch.FloatTensor(sensing)
                     control = self.step(sensing, comm).numpy()
-                    return control.reshape(self.N, 2), comm.copy()
+                    return control.reshape(self.N, 2), comm.numpy().copy()
 
             return f
         return fake_target_filter

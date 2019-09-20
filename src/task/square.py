@@ -4,22 +4,63 @@ from math import atan2
 from scipy.spatial import distance
 
 from task.math import *
-from . import Task, Run
+from . import Task, Run, DaggerRun
 
 """ RAW TASK TARGET GENERATOR """
 
 
-def circular_evenly_spread(N: int, L: float= 1.0, radius=None) -> np.ndarray:
-    radius = L / 2 if (radius is None) else radius
+def circular_evenly_spread(N: int, L: float, spawn_area_size) -> np.ndarray:
+    if L is None:
+        print("Assuming unit square for target area")
+        L = 1.
+    if spawn_area_size is None:
+        print("Assuming unit square for spawn area")
+        spawn_area_size = 1.
+    radius = L / 2
     equidistant = np.linspace(0, 2 * np.pi * (N - 1) / N, N)
-    return np.c_[radius * np.cos(equidistant), radius * np.sin(equidistant)] + L / 2
+    return np.c_[radius * np.cos(equidistant), radius * np.sin(equidistant)] + spawn_area_size / 2
 
 
-def circular_zipf(N: int, L: float = 1.0) -> np.ndarray:
+def circular_zipf(N: int, L: float, spawn_area_size) -> np.ndarray:
+    if L is None:
+        print("Assuming unit square for target area")
+        L = 1.
+    if spawn_area_size is None:
+        print("Assuming unit square for spawn area")
+        spawn_area_size = 1.
+    radius = L / 2
     ds = 1 / np.arange(1, N + 2)
-    ds *= L / np.sum(ds)
+    ds *= 1 / np.sum(ds)
     ds = np.cumsum(ds)[:-1] * 2 * np.pi
-    return np.c_[L / 2 * np.cos(ds), L / 2 * np.sin(ds)] + L / 2
+    return np.c_[radius * np.cos(ds), radius * np.sin(ds)] + spawn_area_size / 2
+
+
+def shape_config(shape: int, N: int, L: float, spawn_area_size) -> np.ndarray:
+    if shape is None:
+        print("Assuming triangular shape")
+        shape = 3
+    assert N % shape == 0, f"{N} is not a multiple of 3"
+    assert N > 0
+    if L is None:
+        print("Assuming unit square for target area")
+        L = 1.
+    if spawn_area_size is None:
+        print("Assuming unit square for spawn area")
+        spawn_area_size = 1.
+
+    radius = L / 2
+
+    equidistant = np.linspace(0, 2 * np.pi * (shape - 1) / shape, shape)
+    first3 = np.c_[radius * np.cos(equidistant), radius * np.sin(equidistant)] + spawn_area_size / 2
+
+    remaining_per_side = int((N-shape) / shape)
+    extra_points = []
+    for i in range(shape):
+        xy1, xy2 = first3[i], first3[(i + 1) % shape]
+        for j in range(remaining_per_side):
+            t = (j+1)/(remaining_per_side+1)
+            extra_points.append(xy1 + (xy2-xy1)*t)
+    return np.vstack([first3, extra_points])
 
 
 """ CONTROLLERS AND ABSTRACTIONS """
@@ -90,17 +131,24 @@ def h_position_controller(controller, max_speed: float = 1.0):
     return target_filter
 
 
-""" DIFFERENT SENSING MODES """
+""" CHECKS """
+
+#
+# def robot_collision(self):
+#     distances = distance.cdist(self.positions, self.positions, 'euclidean')
+#     min_dist = (distances + np.eye(self.n_robots) * self.max_theoretical_distance).min()  # Ignore the 0 diag
+#     if min_dist < COLLISION_THRESHOLD:
+#         return True, distances
+#     return False, distances
+#
+#
+# def boundaries_collision(self):
+#     return all([(self.positions[:, axis].min() < b[0] + COLLISION_THRESHOLD) |
+#                 (self.positions[:, axis].max() > b[1] - COLLISION_THRESHOLD)
+#                 for axis, b in enumerate(self.boundaries)])
 
 
-def fixed_neighbors(xys):
-    out = np.array([[j for j in range(len(xys)) if j != i] for i in range(len(xys))])
-    return out
-
-
-def sorted_neighbors(xys):
-    out = np.argsort(distance.cdist(xys, xys), axis=1)[:, 1:]
-    return out
+""" SENSING """
 
 
 def smart_subset(subset):
@@ -110,7 +158,7 @@ def smart_subset(subset):
         return lambda N: subset
 
 
-def range_step(range):
+def range_mask(range):
     if range is None:
         return lambda deltas: deltas
     else:
@@ -122,13 +170,10 @@ def range_step(range):
         return f
 
 
-def sense(sorted=False, subset=None, range=None):
-    assert sorted or (not sorted and subset is None), \
-        "You cannot have a subset of fixed-order neighbors, it does not make 'sense'"
-
-    neighbor_ids = sorted_neighbors if sorted else fixed_neighbors
+def sense(subset=None, robot_range=None):
+    neighbor_ids = lambda xys: np.argsort(distance.cdist(xys, xys), axis=1)[:, 1:]
     get_subset = smart_subset(subset)
-    eventual_range_step = range_step(range)
+    range_filter = range_mask(robot_range)
 
     def sense(holonomic):
         def h_sense(xys):
@@ -137,7 +182,7 @@ def sense(sorted=False, subset=None, range=None):
             sensing_ids = neighbor_ids(xys)[:, :ss]
             protagonist = np.moveaxis(np.repeat(xys, ss, axis=1).reshape(N, 2, ss), 1, 2)
             deltas_xys = xys[sensing_ids] - protagonist
-            final = eventual_range_step(deltas_xys)
+            final = range_filter(deltas_xys)
             return final
 
         def nh_sense(positions):  # N x 3 x 3
@@ -158,14 +203,14 @@ def sense(sorted=False, subset=None, range=None):
                                          for pos, neighbors in zip(positions, deltas_xys_one)])
             deltas_transform_clean = deltas_transform[:, :, :2]
 
-            final = eventual_range_step(deltas_transform_clean)
+            final = range_filter(deltas_transform_clean)
             return final
 
         sense = h_sense if holonomic else nh_sense
-        sense.sorted = sorted
         sense.subset = subset
-        sense.range = range
-        sense.get_input_size = lambda N: get_subset(N) * 2 if (range is None) else get_subset(N) * 3
+        sense.range = robot_range
+        sense.get_input_size = lambda N: get_subset(N) * 2 if (robot_range is None) else get_subset(N) * 3
+        sense.get_shape = lambda N: (N, get_subset(N), 2 if (robot_range is None) else 3)
         return sense
 
     return sense
@@ -180,29 +225,31 @@ def random_robot_poses(L, N):
 
 
 class StaticPositionTask(Task):
-    def __init__(self, target_xys, holonomic: bool = None, L: float = 1):
+    def __init__(self, target_xys, holonomic: bool = None, spawn_area_size: float = None):
         if holonomic is None:
-            print("Assuming holonomic robots, otherwise change the task parameter")
+            print("Assuming holonomic robots")
             holonomic = True
-        self.L = L
+        if spawn_area_size is None:
+            spawn_area_size = 1.
+        self.spawn_area_size = spawn_area_size
         self.target_xys = np.array(target_xys)
         self.N = len(self.target_xys)
         self.holonomic = holonomic
         self.initial = self.h if self.holonomic else self.nh
 
     def h(self):
-        self.initial_state = np.random.uniform(0, self.L, size=(self.N, 2))
+        self.initial_state = np.random.uniform(0, self.spawn_area_size, size=(self.N, 2))
         self.initial_state = self.initial_state[hungarian_matching(self.target_xys, self.initial_state)]
         return self.initial_state, self.target_xys
 
     def nh(self):
-        self.initial_state = random_robot_poses(self.L, self.N)
+        self.initial_state = random_robot_poses(self.spawn_area_size, self.N)
         self.initial_state = self.initial_state[
             hungarian_matching(self.target_xys, extract_xys_from_state(self.initial_state))]
         return self.initial_state, self.target_xys
 
     def update(self):
-        return lambda c, sc, state: c, self.target_xys
+        return lambda c, sc, state: (c, self.target_xys)
 
     def distance(self):
         if self.holonomic:
@@ -212,37 +259,38 @@ class StaticPositionTask(Task):
 
 
 class AdaptivePositionTask(Task):
-    def __init__(self, target_xys, holonomic: bool = None, L: float = 1):
+    def __init__(self, target_xys, holonomic: bool = None, spawn_area_size: float = None):
         if holonomic is None:
-            print("Assuming holonomic robots, otherwise change the task parameter")
+            print("Assuming holonomic robots")
             holonomic = True
-        self.L = L
+        if spawn_area_size is None:
+            spawn_area_size = 1.
+        self.spawn_area_size = spawn_area_size
         self.target_xys = np.array(target_xys)
         self.N = len(self.target_xys)
         self.holonomic = holonomic
         self.initial = self.h if self.holonomic else self.nh
 
     def h(self):
-        self.initial_state = np.random.uniform(0, self.L, size=(self.N, 2))
+        self.initial_state = np.random.uniform(0, self.spawn_area_size, size=(self.N, 2))
         self.target_xys = hICP(self.initial_state, self.target_xys)
         return self.initial_state, self.target_xys
 
     def nh(self):
-        self.initial_state = random_robot_poses(self.L, self.N)
+        self.initial_state = random_robot_poses(self.spawn_area_size, self.N)
         self.target_xys = nhICP(self.initial_state, self.target_xys)
         return self.initial_state, self.target_xys
 
     def update(self):
-        if self.holonomic:
-            def f(c,sc,state):
-                tmp = hICP(state, self.target_xys)
-                return sc(tmp), tmp
-            return f
-        else:
-            def f(c, sc, state):
-                tmp = nhICP(state, self.target_xys)
-                return sc(tmp), tmp
-            return f
+        def hf(c, sc, state):
+            self.target_xys = hICP(state, self.target_xys)
+            return sc(self.target_xys), self.target_xys
+
+        def nhf(c, sc, state):
+            self.target_xys = nhICP(state, self.target_xys)
+            return sc(self.target_xys), self.target_xys
+
+        return hf if self.holonomic else nhf
 
     def distance(self):
         if self.holonomic:
@@ -251,20 +299,34 @@ class AdaptivePositionTask(Task):
             return lambda pos: np.max(np.abs(self.target_xys - np.array(extract_xys_from_state(pos))))
 
 
-def static_zipf_task(N: int, holonomic=None):
-    return StaticPositionTask(circular_zipf(N, L=1), holonomic, L=1)
+def static_zipf_task(N: int, holonomic=None, spawn_area_size=None, target_area_size=None):
+    return StaticPositionTask(circular_zipf(N, L=target_area_size, spawn_area_size=spawn_area_size),
+                              holonomic, spawn_area_size=spawn_area_size)
 
 
-def adaptive_zipf_task(N: int, holonomic=None):
-    return AdaptivePositionTask(circular_zipf(N, L=1), holonomic, L=1)
+def adaptive_zipf_task(N: int, holonomic=None, spawn_area_size=None, target_area_size=None):
+    return AdaptivePositionTask(circular_zipf(N, L=target_area_size, spawn_area_size=spawn_area_size),
+                                holonomic, spawn_area_size=spawn_area_size)
 
 
-def static_evenly_spread_task(N: int, holonomic=None):
-    return StaticPositionTask(circular_evenly_spread(N, L=1), holonomic, L=1)
+def static_evenly_spread_task(N: int, holonomic=None, spawn_area_size=None, target_area_size=None):
+    return StaticPositionTask(circular_evenly_spread(N, L=target_area_size, spawn_area_size=spawn_area_size),
+                              holonomic, spawn_area_size=spawn_area_size)
 
 
-def adaptive_evenly_spread_task(N: int, holonomic=None, radius=None):
-    return AdaptivePositionTask(circular_evenly_spread(N, L=1, radius=radius), holonomic, L=1)
+def adaptive_evenly_spread_task(N: int, holonomic=None, spawn_area_size=None, target_area_size=None):
+    return AdaptivePositionTask(circular_evenly_spread(N, L=target_area_size, spawn_area_size=spawn_area_size),
+                                holonomic, spawn_area_size=spawn_area_size)
+
+
+def static_shape_task(shape: int, N: int, holonomic=None, spawn_area_size=None, target_area_size=None):
+    return StaticPositionTask(shape_config(shape, N, L=target_area_size, spawn_area_size=spawn_area_size),
+                              holonomic, spawn_area_size=spawn_area_size)
+
+
+def adaptive_shape_task(shape: int, N: int, holonomic=None, spawn_area_size=None, target_area_size=None):
+    return AdaptivePositionTask(shape_config(shape, N, L=target_area_size, spawn_area_size=spawn_area_size),
+                                holonomic, spawn_area_size=spawn_area_size)
 
 
 def h_dynamic(dt: float = 0.1, max_speed: float = 1):
@@ -290,3 +352,16 @@ class SquareRun(Run):
             controller = nh_position_controller(controller)
 
         super(SquareRun, self).__init__(task=task, dt=dt, sensor=sensor(task.holonomic), controller=controller)
+
+
+class DaggerSquareRun(DaggerRun):
+    def __init__(self, net, task, controller, sensor, dt: float = 0.1,
+                 expert_window=5, net_window=5, possessed_expert=False):
+        if task.holonomic:
+            controller = h_position_controller(controller)
+            dynamic = h_dynamic(dt)
+        else:
+            controller = nh_position_controller(controller)
+            dynamic = nh_dynamic(dt)
+        super(DaggerSquareRun, self).__init__(net=net, task=task, controller=controller, dynamic=dynamic, sensor=sensor, dt=dt,
+                                              expert_window=expert_window, net_window=net_window, possessed_expert=possessed_expert)

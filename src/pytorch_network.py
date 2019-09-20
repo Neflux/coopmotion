@@ -32,7 +32,8 @@ def train_net(epochs: int,
               batch_size: int = 100,
               learning_rate: float = 0.001,
               training_loss: Optional[List[float]] = None,
-              testing_loss: Optional[List[float]] = None) -> Tuple[List[float], List[float]]:
+              testing_loss: Optional[List[float]] = None,
+              disable_tqdm=False) -> Tuple[List[float], List[float]]:
 
     # x_train, y_train = train_dataset
     # x_test, y_test = test_dataset
@@ -47,7 +48,7 @@ def train_net(epochs: int,
         training_loss = []
     if testing_loss is None:
         testing_loss = []
-    for _ in tqdm(range(epochs)):
+    for _ in tqdm(range(epochs), disable=disable_tqdm):
         epoch_loss = 0.0
         for n, (inputs, labels) in enumerate(dl):
             output = net(inputs)
@@ -60,15 +61,6 @@ def train_net(epochs: int,
         with torch.no_grad():
             testing_loss.append(
                 sum([float(criterion(net(inputs), labels)) for inputs, labels in tdl]))
-
-    # import matplotlib.pyplot as plt
-    # plt.title('Loss')
-    # plt.semilogy(training_loss, label='training')
-    # plt.semilogy(testing_loss, label='testing')
-    # plt.xlabel('epoch')
-    # plt.legend()
-    # plt.show()
-
     return training_loss, testing_loss
 
 

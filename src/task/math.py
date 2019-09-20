@@ -34,6 +34,10 @@ def extract_from_trace(matss):
                      matss[:, :, 1, 2],
                      np.arctan2(matss[:, :, 1, 0], matss[:, :, 0, 0])], 2)
 
+def extract_xys_from_trace(matss):
+    # n x N x 3 x 3 -> n x N x (2+1)
+    return np.stack([matss[:, :, 0, 2], matss[:, :, 1, 2]], 2)
+
 
 def mktr(x, y):
     return np.array([[1, 0, x],
@@ -88,6 +92,26 @@ def transform_estimation(positions, targets):
     Paligned = Paligned.T
 
     return Paligned
+
+def dagger_remappers(epochs, safe_limsup, steps, x_dilation = 3, y_dilation= 1):
+    from scipy.interpolate import interp1d
+
+    mx = interp1d([-x_dilation, x_dilation], [0, epochs])
+    my = interp1d([-y_dilation, y_dilation], [steps, safe_limsup-steps])
+
+    x = np.linspace(-x_dilation, x_dilation, epochs)
+    y = y_dilation*np.tanh(x)
+
+    x, y = mx(x), my(y)
+
+    return x.astype(int), y.astype(int)
+
+
+def calculate_side(n, r):
+    theta = 360 / n
+    theta_in_radians = theta * 3.14 / 180
+
+    return 2 * r * np.sin(theta_in_radians / 2)
 
 
 def skip_diag_strided(A):
